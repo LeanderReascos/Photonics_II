@@ -16,8 +16,8 @@ class EXPERIMENT:
         values = ['start_pos','end_pos','step','exposure_time','avg_Power','aperture','no_lens']
         self.log = dict(zip(values,[float(n) for n in re.findall(r'\d+| \d+\.\d+|\.\d+',self.log_file)]))
         A = (self.log['aperture']*1e-3)**2*np.pi
-        self.I = self.power_points/A*self.log['exposure_time']
-        self.I0 = self.power/A*self.log['exposure_time']
+        self.I = self.power_points/A
+        self.I0 = self.power/A
 
         self.T = self.I/self.I0 #Trasmitance
         self.DT = self.T/self.T[-1] #T/T(Z>>Z0)
