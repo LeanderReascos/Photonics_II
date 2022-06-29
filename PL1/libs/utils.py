@@ -1,11 +1,21 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import re
+from scipy.optimize import curve_fit
+
+def media_movel(y,n):
+    y = np.array(y)
+    y_new = np.empty(len(y))
+    for i in np.arange(len(y)-n):
+        y_new[i] = np.mean(y[i:i+n+1])
+    for j in np.arange(len(y)-n,len(y)):
+        y_new[j] = np.mean([y[j]]+list(y_new[j-n:j])+list(y[j:])) 
+    return y_new
 
 class DATA:
     def __init__(self,material,group,aperture,power):
         PATH = 'Data/'
-        file = f'zscan_{material}_300322_g{group}_{aperture}_{power}mW/'
+        file = f'zscan_{material}_g{group}_{aperture}_{power}mW/'
         self.power = power*1e-3
         self.material = material
         self.aperture = aperture
@@ -18,27 +28,30 @@ class DATA:
         values = ['start_pos','end_pos','step','exposure_time','avg_Power','aperture','no_lens']
         self.log = dict(zip(values,[float(n) for n in re.findall(r'\d+| \d+\.\d+|\.\d+',self.log_file)]))
 
-        self.T = self.power_points/self.power #Trasmitance
-        self.DT = self.T/self.T[-1] #T/T(Z>>Z0)
-
         print(f'Material: {material} Aperture: {aperture} Power: {power}')
     
     def plot_power(self,title=None):
         title = f'Power Plot\n{self.material}-{self.aperture},{self.power}W' if title is None else title
-        fig,ax = plt.subplots()
+        fig,ax = plt.subplots(constrained_layout=True)
         ax.set_title(title,fontsize=16)
         ax.plot(self.positions,self.power_points)
-
+        return fig,ax
         
     def plot_normalized_trasmittance(self,title=None):
-        title = f'$\Delta T(Z)$\n{self.material}-{self.aperture},{self.power}W\n T(Z>>Z0) = {self.T[-1]}' if title is None else title
-        fig,ax = plt.subplots()
-        ax.set_title(title,fontsize=16)
+        title = f'$\Delta T(z)$\n{self.material}-{self.aperture},{self.power}W\n T(Z>>Z0) = {self.T[-1]}' if title is None else title
+        fig,ax = plt.subplots( constrained_layout=True)
+        ax.set_title(title,fontsize=14)
+        ax.set_xlabel('$z$ $(m)$',fontsize=13)
+        ax.set_ylabel('$\Delta T(z)$',fontsize=13)
         ax.plot(self.positions,self.DT)
+        return fig,ax
 
 class CLOSE(DATA):
     def __init__(self, material, group, aperture, power):
         super().__init__(material, group, aperture, power)
+
+        self.T = self.power_points/self.power #Trasmitance
+        self.DT = self.T/self.T[-1] #T/T(Z>>Z0)
 
         self.Tp = np.max(self.DT)
         self.Tv = np.min(self.DT)
@@ -80,11 +93,51 @@ class CLOSE(DATA):
 class OPEN(DATA):
     def __init__(self, material, group, aperture, power):
         super().__init__(material, group, aperture, power)
+        self.noisy_power_points = np.copy(self.power_points)
+        self.power_points = media_movel(self.power_points,7)
+        self.T = self.power_points/self.power #Trasmitance
+        self.DT = self.T/self.T[-1] #T/T(Z>>Z0)
 
     def set_focalPlane(self,Zfolcal_plane):
         self.Zfocal_plane = Zfolcal_plane
         self.positions -= self.Zfocal_plane
     
+    def plot_noisy_filtered_points(self):
+        fig,ax = plt.subplots(constrained_layout=True)
+        ax.plot(self.positions,self.noisy_power_points,label='noisy')
+        ax.plot(self.positions,self.power_points,label='filtered')
+        ax.legend()
+        title = f'$P(z)$\n{self.material}-{self.aperture},{self.power}W'
+        ax.set_title(title,fontsize=14)
+        ax.set_xlabel('$z$ $(m)$',fontsize=13)
+        ax.set_ylabel('$P(z)$',fontsize=13)
+        return fig,ax
+
+    def set_expValues(self,z0,wave_lenght,L,I0):
+        self.z0 = z0
+        self.wave_lenght = wave_lenght
+        self.L = L
+        self.I0 = I0
+    
+    def curve(self,z,qo):
+        return qo/(2*np.sqrt(2))*1/(1+z**2/self.z0**2)+1
+    
+    def plot_fitcurve(self):
+        q0,dq0 = curve_fit(self.curve,self.positions,self.DT)
+        self.q0 = q0[0]
+        self.beta = self.q0/(self.I0*self.L)
+        print(f'qo: {self.q0}')
+        print(f'b: {self.beta}')
+        fig,ax = plt.subplots(constrained_layout=True)
+        ax.scatter(self.positions,self.DT,color='gray',marker='+',label='Experimental points')
+        p = self.positions
+        ax.plot(p,self.curve(p,self.q0),label='Fitting',color='red')
+        ax.legend()
+        title = f'$\Delta T(z)$\n{self.material}-{self.aperture},{self.power}W'
+        ax.set_title(title,fontsize=14)
+        ax.set_xlabel('$z$ $(m)$',fontsize=13)
+        ax.set_ylabel('$\Delta T(z)$',fontsize=13)
+        return fig,ax
 
 class EXPERIMENT:
     def __init__(self,material,group,power):
@@ -100,6 +153,10 @@ class EXPERIMENT:
         self.wave_lenght = wave_lenght
         self.L = L_material
         self.close.set_expValues(wave_lenght,L_material)
+        self.open.set_expValues(self.close.z0,wave_lenght,L_material,self.close.I0)
+    
+    def get_values(self):
+        return [self.material,self.group,self.power,self.close.S,self.close.z0,self.close.w0, self.close.I0, self.close.DPhi, self.close.n2]
 
 
     
